@@ -1,0 +1,21 @@
+{
+  "feature_columns": [
+    "area_km2",
+    "P22_POP",
+    "P22_PMEN",
+    "population_density",
+    "trilib_count",
+    "trilib_density",
+    "green_area_m2",
+    "green_ratio",
+    "distance_to_paris_centroid_m"
+  ],
+  "rows_total": 992,
+  "rows_robust_training": 795,
+  "suspected_false_zero_count": 197,
+  "special_iris_filtered_count": 65,
+  "top50_overlap_oof_vs_robust_count": 16,
+  "top50_overlap_fullfit_vs_robust_count": 19,
+  "xgboost_available": true,
+  "report_path": "C:\\Bin Placement Project\\paris-bins-ml\\docs\\modeling_report.md"
+}

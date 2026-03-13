@@ -1,0 +1,11 @@
+code_iris,nom_iris,bin_count,area_km2,P22_POP,probable_explanation,outlier_group
+751103712,Saint-Vincent de Paul 12,154,0.143515469435401,687.386716889291,Probable polarite de transport autour de Gare du Nord / Gare de l Est.,top_5
+751093409,Chaussée d'Antin 9,64,0.06072438184317169,692.499166343973,IRIS tres petit; la densite est amplifiee par une faible surface.,top_5
+751124811,Quinze-Vingts 11,109,0.1159148662994143,0.0,Probable polarite de transport autour de Gare de Lyon et des grands flux pietons.,top_5
+751155818,Necker 18,80,0.09285365143199673,1213.0493216903,Probable effet gare Montparnasse / hub tertiaire et flux de transit.,top_5
+751083208,Europe 8,102,0.1215200658583139,737.023326630264,Probable effet Saint-Lazare / quartier de bureaux et commerce.,top_5
+751093608,Rochechouart 8,0,0.06140239879646817,2504.11161904635,IRIS dense sans point OSM: sous-couverture OSM probable plutot qu absence reelle de corbeilles.,bottom_5
+751010102,Saint-Germain l'Auxerrois 2,0,0.06155353475229657,157.787119820794,Zero OSM a verifier; peut relever d une sous-couverture ou d un IRIS tres specialise.,bottom_5
+751207913,Père Lachaise 13,0,0.04562761687099112,1954.96078535304,IRIS dense sans point OSM: sous-couverture OSM probable plutot qu absence reelle de corbeilles.,bottom_5
+751083101,Madeleine 1,0,0.12201079953180564,129.118963076603,Zero OSM a verifier; peut relever d une sous-couverture ou d un IRIS tres specialise.,bottom_5
+751155733,Saint-Lambert 33,0,0.014679505709726553,0.0,IRIS non residentiel ou emprise specifique; zero possible mais a verifier.,bottom_5
