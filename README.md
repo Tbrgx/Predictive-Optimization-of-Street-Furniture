@@ -1,15 +1,15 @@
 # Paris Bins ML
 
-Projet academique de regression multiple appliquee a l'urbanisme parisien.
-La voie primaire du repository suit maintenant strictement la consigne pedagogique :
+Projet academique de machine learning applique a l'urbanisme parisien.
+Le pipeline suit la consigne pedagogique en deux phases :
 
 - unite d'analyse = 20 arrondissements ;
 - cible `Y` = nombre brut de corbeilles OSM par arrondissement ;
 - variables explicatives `X1..X5` = population, commerces/restaurants, stations de transport, espaces verts, longueur de routes ;
-- clustering `KMeans (K=3)` puis variables indicatrices ;
-- modele final = `LinearRegression`.
+- **Phase 1 (baseline)** : clustering `KMeans (K=3)` + variables indicatrices + `LinearRegression` ;
+- **Phase 2 (methode principale)** : `MLPRegressor` (reseau de neurones, sklearn) avec split train/test et LOOCV.
 
-Le livrable principal est un classement prescriptif des 20 arrondissements, complete par une carte choropleth `Folium`.
+Le livrable principal est un pipeline de prediction avec evaluation comparative et un classement prescriptif des 20 arrondissements.
 
 ## Repository Structure
 
@@ -43,15 +43,24 @@ paris-bins-ml/
     └── technical_functional_traceability.md
 ```
 
-## Primary Method
+## Pipeline Phase 2 (methode principale)
 
 1. Telecharger ou reutiliser les jeux de donnees pedagogiques.
 2. Construire 20 polygones d'arrondissement par dissolution des contours IRIS.
 3. Agreger la cible `Y` et les variables `X1..X5` a l'echelle arrondissement.
+4. Creer les arrays `X (20, 5)` et `y (20,)`.
+5. Separer en train (16 obs) et test (4 obs) avec `train_test_split(test_size=0.2, random_state=42)`.
+6. Entrainer `MLPRegressor(hidden_layer_sizes=(8,4), activation='relu', solver='adam')` via un `Pipeline` avec `StandardScaler`.
+7. Evaluer les predictions sur train, test et en LOOCV.
+8. Comparer avec la baseline lineaire (phase 1).
+9. Exporter les metriques, predictions et visualisations.
+
+## Pipeline Phase 1 (baseline comparative)
+
+1-3. Identique a la phase 2.
 4. Standardiser `X1..X5`, estimer `KMeans(n_clusters=3)`, puis creer `cl_2` et `cl_3`.
-5. Entrainement d'une regression lineaire multiple sur 20 observations.
+5. Entrainement d'une `LinearRegression` sur 20 observations.
 6. Calcul du score prescriptif `priority_score = y_predicted - y_observed`.
-7. Export du classement des 20 arrondissements et de la carte finale.
 
 ## Setup
 
@@ -76,16 +85,29 @@ python src/build_map.py
 
 ## Primary Outputs
 
+### Phase 2 (reseau de neurones)
+
 - `data/processed/master_arrondissements.csv`
 - `data/processed/master_arrondissements.geojson`
+- `outputs/tables/phase2_feature_matrix.csv`
+- `outputs/tables/phase2_target_vector.csv`
+- `outputs/tables/phase2_train_test_summary.csv`
+- `outputs/tables/neural_network_predictions.csv`
+- `outputs/tables/neural_network_metrics.csv`
+- `outputs/tables/linear_regression_baseline_metrics.csv`
+- `outputs/figures/y_vs_features_scatterplots.png`
+- `outputs/figures/neural_network_actual_vs_predicted.png`
+- `outputs/figures/neural_network_residuals.png`
+
+### Phase 1 (baseline)
+
 - `outputs/tables/arrondissement_feature_matrix.csv`
 - `outputs/tables/arrondissement_clusters.csv`
 - `outputs/tables/arrondissement_regression_coefficients.csv`
 - `outputs/tables/arrondissement_predictions.csv`
 - `outputs/tables/arrondissement_priority_ranking.csv`
-- `outputs/priority_map.html`
 
-Le rapport de modelisation pedagogique est dans [docs/modeling_report.md](/c:/Bin Placement Project/paris-bins-ml/docs/modeling_report.md).
+Le rapport de modelisation est dans [docs/modeling_report.md](docs/modeling_report.md).
 La trace de migration et d'audit est dans [docs/technical_functional_traceability.md](/c:/Bin Placement Project/paris-bins-ml/docs/technical_functional_traceability.md).
 
 ## Data Sources

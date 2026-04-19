@@ -7,12 +7,18 @@ import sys
 from typing import Any
 
 import geopandas as gpd
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 from sklearn.cluster import KMeans
 from sklearn.compose import ColumnTransformer
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from sklearn.model_selection import LeaveOneOut, cross_val_predict
+from sklearn.model_selection import LeaveOneOut, cross_val_predict, train_test_split
+from sklearn.neural_network import MLPRegressor
+from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -22,8 +28,18 @@ if str(PROJECT_ROOT) not in sys.path:
 from config import (
     BUSINESS_FEATURE_COLUMNS,
     DOCS_DIR,
+    FIGURES_DIR,
+    MLP_ACTIVATION,
+    MLP_ALPHA,
+    MLP_HIDDEN_LAYER_SIZES,
+    MLP_MAX_ITER,
+    MLP_SOLVER,
     PEDAGOGICAL_CLUSTER_COUNT,
     PEDAGOGICAL_TARGET_COLUMN,
+    PHASE2_FEATURE_COLUMNS,
+    PHASE2_RANDOM_STATE,
+    PHASE2_TARGET_COLUMN,
+    PHASE2_TEST_SIZE,
     PROCESSED_DATA_DIR,
     RAW_DATA_DIR,
     TABLES_DIR,
@@ -447,6 +463,200 @@ def run_pedagogical_regression_pipeline(force_download: bool = False) -> dict[st
         "predictions": predictions_df,
         "priority_ranking": ranking_df,
         "summary": summary,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 – Neural Network pipeline
+# ---------------------------------------------------------------------------
+
+
+def create_feature_response_arrays(master_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
+    """Select X1..X5 features and y_bin_count target; validate types and NaN absence."""
+    X = master_df[PHASE2_FEATURE_COLUMNS].copy()
+    y = master_df[PHASE2_TARGET_COLUMN].copy()
+
+    for col in PHASE2_FEATURE_COLUMNS:
+        X[col] = pd.to_numeric(X[col], errors="raise")
+    y = pd.to_numeric(y, errors="raise")
+
+    if X.isna().any().any():
+        raise ValueError(f"NaN detected in feature matrix: {X.isna().sum().to_dict()}")
+    if y.isna().any():
+        raise ValueError("NaN detected in target vector.")
+
+    return X, y
+
+
+def create_train_test_datasets(
+    X: pd.DataFrame,
+    y: pd.Series,
+    test_size: float = PHASE2_TEST_SIZE,
+    random_state: int = PHASE2_RANDOM_STATE,
+) -> dict[str, pd.DataFrame | pd.Series]:
+    """Split X and y into train/test sets (no stratification – regression)."""
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=test_size, random_state=random_state
+    )
+    return {
+        "X_train": X_train,
+        "X_test": X_test,
+        "y_train": y_train,
+        "y_test": y_test,
+    }
+
+
+def build_neural_network_pipeline() -> Pipeline:
+    """Build a sklearn Pipeline: StandardScaler + MLPRegressor with fixed hyperparameters."""
+    return Pipeline([
+        ("scaler", StandardScaler()),
+        ("mlp", MLPRegressor(
+            hidden_layer_sizes=MLP_HIDDEN_LAYER_SIZES,
+            activation=MLP_ACTIVATION,
+            solver=MLP_SOLVER,
+            alpha=MLP_ALPHA,
+            max_iter=MLP_MAX_ITER,
+            random_state=PHASE2_RANDOM_STATE,
+        )),
+    ])
+
+
+def evaluate_regression_predictions(y_true: pd.Series, y_pred: np.ndarray) -> dict[str, float]:
+    """Compute R2, RMSE, and MAE for a set of predictions."""
+    return {
+        "r2": float(r2_score(y_true, y_pred)),
+        "rmse": float(mean_squared_error(y_true, y_pred) ** 0.5),
+        "mae": float(mean_absolute_error(y_true, y_pred)),
+    }
+
+
+def _plot_y_vs_features(X: pd.DataFrame, y: pd.Series) -> None:
+    """Save scatterplots of y vs each X feature."""
+    fig, axes = plt.subplots(1, 5, figsize=(20, 4))
+    feature_labels = ["X1 Population", "X2 Commerce/Restaurants", "X3 Transport Stations", "X4 Green Area (m²)", "X5 Road Length (km)"]
+    for ax, col, label in zip(axes, PHASE2_FEATURE_COLUMNS, feature_labels):
+        ax.scatter(X[col], y, color="steelblue", edgecolors="white", linewidths=0.5)
+        ax.set_xlabel(label, fontsize=9)
+        ax.set_ylabel("Y (bin count)" if ax == axes[0] else "")
+        ax.set_title(f"Y vs {label.split()[0]}", fontsize=10)
+    fig.suptitle("Scatterplots: Y (bin count) vs X1..X5", fontsize=12, fontweight="bold")
+    fig.tight_layout()
+    fig.savefig(FIGURES_DIR / "y_vs_features_scatterplots.png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+
+def _plot_actual_vs_predicted(y_true: pd.Series, y_pred: np.ndarray) -> None:
+    """Save actual vs predicted scatter for MLP."""
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.scatter(y_true, y_pred, color="steelblue", edgecolors="white", linewidths=0.5)
+    lims = [min(y_true.min(), y_pred.min()) * 0.9, max(y_true.max(), y_pred.max()) * 1.1]
+    ax.plot(lims, lims, "r--", linewidth=1, label="Perfect fit")
+    ax.set_xlabel("Actual Y (bin count)")
+    ax.set_ylabel("Predicted Y (bin count)")
+    ax.set_title("Neural Network: Actual vs Predicted")
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(FIGURES_DIR / "neural_network_actual_vs_predicted.png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+
+def _plot_residuals(y_true: pd.Series, y_pred: np.ndarray) -> None:
+    """Save residuals vs predicted scatter for MLP."""
+    residuals = y_true.values - y_pred
+    fig, ax = plt.subplots(figsize=(6, 4))
+    ax.scatter(y_pred, residuals, color="steelblue", edgecolors="white", linewidths=0.5)
+    ax.axhline(0, color="red", linestyle="--", linewidth=1)
+    ax.set_xlabel("Predicted Y (bin count)")
+    ax.set_ylabel("Residual")
+    ax.set_title("Neural Network: Residuals vs Predicted")
+    fig.tight_layout()
+    fig.savefig(FIGURES_DIR / "neural_network_residuals.png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+
+def run_phase2_neural_network_pipeline(
+    csv_path: Path | None = None,
+    force_download: bool = False,
+) -> dict[str, Any]:
+    """Full phase 2 pipeline: load data, split, train MLP, evaluate, export."""
+    PROCESSED_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    TABLES_DIR.mkdir(parents=True, exist_ok=True)
+
+    if csv_path is None and not PROCESSED_MASTER_CSV.exists():
+        build_pedagogical_master_table(force_download=force_download)
+
+    master_df = load_master_arrondissements(csv_path)
+
+    X, y = create_feature_response_arrays(master_df)
+
+    datasets = create_train_test_datasets(X, y)
+    X_train = datasets["X_train"]
+    X_test = datasets["X_test"]
+    y_train = datasets["y_train"]
+    y_test = datasets["y_test"]
+
+    pipeline = build_neural_network_pipeline()
+    pipeline.fit(X_train, y_train)
+
+    y_pred_train = pipeline.predict(X_train)
+    y_pred_test = pipeline.predict(X_test)
+
+    train_metrics = {f"train_{k}": v for k, v in evaluate_regression_predictions(y_train, y_pred_train).items()}
+    test_metrics = {f"test_{k}": v for k, v in evaluate_regression_predictions(y_test, y_pred_test).items()}
+
+    loo = LeaveOneOut()
+    y_pred_loocv = cross_val_predict(build_neural_network_pipeline(), X, y, cv=loo)
+    loocv_metrics = {f"loocv_{k}": v for k, v in evaluate_regression_predictions(y, y_pred_loocv).items()}
+
+    all_metrics = {**train_metrics, **test_metrics, **loocv_metrics}
+    metrics_df = pd.DataFrame([{"metric": k, "value": v} for k, v in all_metrics.items()])
+
+    y_pred_all = pipeline.predict(X)
+    predictions_df = master_df[["arrondissement_code", "arrondissement_name"]].copy()
+    predictions_df["y_observed"] = y.values
+    predictions_df["y_predicted"] = y_pred_all
+    predictions_df["residual"] = y.values - y_pred_all
+    predictions_df["split"] = "train"
+    predictions_df.loc[X_test.index, "split"] = "test"
+
+    train_test_summary = pd.DataFrame([
+        {"split": "train", "n_rows": len(X_train)},
+        {"split": "test", "n_rows": len(X_test)},
+    ])
+
+    X.to_csv(TABLES_DIR / "phase2_feature_matrix.csv", index=False, encoding="utf-8-sig")
+    y.to_csv(TABLES_DIR / "phase2_target_vector.csv", index=True, header=True, encoding="utf-8-sig")
+    train_test_summary.to_csv(TABLES_DIR / "phase2_train_test_summary.csv", index=False, encoding="utf-8-sig")
+    predictions_df.to_csv(TABLES_DIR / "neural_network_predictions.csv", index=False, encoding="utf-8-sig")
+    metrics_df.to_csv(TABLES_DIR / "neural_network_metrics.csv", index=False, encoding="utf-8-sig")
+
+    # Baseline linear regression comparison
+    X_reg = master_df[BUSINESS_FEATURE_COLUMNS].astype(float)
+    cluster_labels_bl, _ = fit_arrondissement_kmeans(X_reg)
+    cluster_dummies_bl = build_cluster_dummies(cluster_labels_bl)
+    X_reg_full = pd.concat([X_reg, cluster_dummies_bl], axis=1)
+    baseline_results = fit_multiple_linear_regression(X_reg_full, y)
+    loocv_baseline = evaluate_linear_regression_loocv(X_reg_full, y)
+    baseline_metrics = {**baseline_results["metrics"], **loocv_baseline}
+    pd.DataFrame(
+        [{"metric": k, "value": v} for k, v in baseline_metrics.items()]
+    ).to_csv(TABLES_DIR / "linear_regression_baseline_metrics.csv", index=False, encoding="utf-8-sig")
+
+    # Figures
+    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    _plot_y_vs_features(X, y)
+    _plot_actual_vs_predicted(y, pipeline.predict(X))
+    _plot_residuals(y, pipeline.predict(X))
+
+    return {
+        "master_df": master_df,
+        "X": X,
+        "y": y,
+        "datasets": datasets,
+        "pipeline": pipeline,
+        "predictions": predictions_df,
+        "metrics": metrics_df,
+        "all_metrics": all_metrics,
     }
 
 

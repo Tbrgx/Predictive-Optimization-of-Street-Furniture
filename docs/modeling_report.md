@@ -1,93 +1,107 @@
-# Modeling Report
+# Modeling Report – Phase 2
 
-Date d'execution : 2026-03-13
+Date d'exécution : 2026-04-19
 
-## Cadrage pedagogique
+---
 
-- Unite d'analyse : arrondissement (20 observations)
+## Cadrage pédagogique
+
+- Unité d'analyse : arrondissement (20 observations)
 - Variable cible Y : `y_bin_count` = nombre brut de corbeilles OSM par arrondissement
 - Variables explicatives : X1 population, X2 commerces/restaurants, X3 stations de transport, X4 superficie d'espaces verts, X5 longueur de routes
-- Etape 2 : KMeans avec K=3
-- Etape 3 : One-Hot Encoding avec `drop_first=True` pour produire `cl_2` et `cl_3`
-- Etape 4 : LinearRegression
+- Phase 2 : MLPRegressor (réseau de neurones, scikit-learn)
+- Phase 1 (baseline) : KMeans K=3 → One-Hot Encoding → LinearRegression
 
-## Variables du modele
+---
 
-| Colonne | Definition |
+## Variables du modèle
+
+| Colonne | Définition |
 | --- | --- |
 | `x1_population` | Population INSEE totale par arrondissement |
 | `x2_commerce_restaurant_count` | Comptage OSM des commerces/restaurants |
 | `x3_transport_station_count` | Comptage OSM des stations de transport |
-| `x4_green_area_m2` | Surface totale d'espaces verts en m2 |
+| `x4_green_area_m2` | Surface totale d'espaces verts en m² |
 | `x5_road_length_km` | Longueur totale des routes OSM en km |
-| `cl_2`, `cl_3` | Variables indicatrices des clusters KMeans |
+| `y_bin_count` | Cible : nombre de corbeilles par arrondissement |
 
-## Clusters d'arrondissements
+---
 
-- Cluster 0 : size=8, X1=174643.6, X2=2509.1, X3=35.2, X4=535592.0, X5=149.471
-- Cluster 1 : size=10, X1=41703.5, X2=2055.9, X3=13.3, X4=88866.7, X5=60.293
-- Cluster 2 : size=2, X1=149760.5, X2=2093.5, X3=36.5, X4=9774412.9, X5=260.901
+## Arrays X et y
 
-## Equation finale
+- `X.shape = (20, 5)` — 20 arrondissements, 5 features (X1..X5)
+- `y.shape = (20,)` — 20 valeurs cibles `y_bin_count`
+- Aucune valeur manquante
 
-```text
-Y = 108.330 - 0.000807*x1_population - 0.027403*x2_commerce_restaurant_count + 10.128120*x3_transport_station_count - 0.000008*x4_green_area_m2 + 0.852140*x5_road_length_km - 5.288935*cl_2 - 179.632895*cl_3
-```
+---
 
-## Coefficients
+## Split train/test
 
-| Terme | Coefficient |
+- Méthode : `train_test_split(test_size=0.2, random_state=42)` — sans stratification (régression)
+- Train : 16 observations
+- Test : 4 observations
+
+---
+
+## Architecture du réseau de neurones
+
+- Implémentation : `sklearn.neural_network.MLPRegressor`
+- Pipeline : `StandardScaler` → `MLPRegressor`
+- `hidden_layer_sizes = (8, 4)` — deux couches cachées
+- `activation = "relu"`
+- `solver = "adam"`
+- `alpha = 0.001` (régularisation L2)
+- `max_iter = 5000`
+- `random_state = 42`
+
+**Note pédagogique :** avec seulement 20 observations, un réseau de neurones est structurellement en sur-apprentissage. Les résultats du test set (R² négatif) et de la LOOCV illustrent exactement cette limite, ce qui en fait un exemple pédagogique précieux. La puissance expressive du MLP est inadaptée à cette maille ; la baseline linéaire est plus robuste à cette échelle.
+
+---
+
+## Métriques — Réseau de neurones (MLPRegressor)
+
+| Métrique | Valeur |
 | --- | ---: |
-| `Intercept` | 108.329682 |
-| `x1_population` | -0.000807 |
-| `x2_commerce_restaurant_count` | -0.027403 |
-| `x3_transport_station_count` | 10.128120 |
-| `x4_green_area_m2` | -0.000008 |
-| `x5_road_length_km` | 0.852140 |
-| `cl_2` | -5.288935 |
-| `cl_3` | -179.632895 |
+| `train_r2` | 0.631194 |
+| `train_rmse` | 127.790 |
+| `train_mae` | 98.436 |
+| `test_r2` | -3.8665 |
+| `test_rmse` | 207.139 |
+| `test_mae` | 176.095 |
+| `loocv_r2` | -0.7193 |
+| `loocv_rmse` | 261.055 |
+| `loocv_mae` | 215.391 |
 
-## Metriques
+---
 
-| Metrique | Valeur |
+## Métriques — Baseline linéaire (KMeans + LinearRegression)
+
+| Métrique | Valeur |
 | --- | ---: |
-| `r2` | 0.379454 |
-| `adjusted_r2` | 0.017469 |
-| `rmse` | 157.709073 |
-| `mae` | 119.879948 |
+| `r2` (in-sample) | 0.394934 |
+| `adjusted_r2` | 0.041979 |
+| `rmse` (in-sample) | 154.864 |
+| `mae` (in-sample) | 117.955 |
 | `n_rows` | 20 |
 | `n_features` | 7 |
-| `loocv_rmse` | 784.157608 |
-| `loocv_mae` | 406.331206 |
+| `loocv_rmse` | 792.964 |
+| `loocv_mae` | 407.096 |
 
-## Classement prescriptif
+---
 
-- Le score de priorite est `y_predicted - y_bin_count`.
-- Un score positif signifie qu'un arrondissement presente un deficit estime de corbeilles par rapport a son profil urbain.
+## Comparaison MLP vs Baseline linéaire
 
-| Rang | Arrondissement | Observe | Predit | Priority Score | Cluster |
-| --- | --- | ---: | ---: | ---: | ---: |
-| 1 | Paris 17e Arrondissement | 315 | 510.592 | 195.592 | 0 |
-| 2 | Paris 18e Arrondissement | 126 | 299.923 | 173.923 | 0 |
-| 3 | Paris 7e Arrondissement | 164 | 320.835 | 156.835 | 1 |
-| 4 | Paris 20e Arrondissement | 166 | 314.388 | 148.388 | 0 |
-| 5 | Paris 8e Arrondissement | 177 | 308.338 | 131.338 | 1 |
-| 6 | Paris 16e Arrondissement | 160 | 278.983 | 118.983 | 2 |
-| 7 | Paris 9e Arrondissement | 108 | 215.345 | 107.345 | 1 |
-| 8 | Paris 2e Arrondissement | 75 | 132.964 | 57.964 | 1 |
-| 9 | Paris 19e Arrondissement | 383 | 433.252 | 50.252 | 0 |
-| 10 | Paris 11e Arrondissement | 123 | 158.741 | 35.741 | 0 |
-| 11 | Paris 6e Arrondissement | 154 | 176.439 | 22.439 | 1 |
-| 12 | Paris 15e Arrondissement | 526 | 525.431 | -0.569 | 0 |
-| 13 | Paris 3e Arrondissement | 113 | 98.681 | -14.319 | 1 |
-| 14 | Paris 4e Arrondissement | 160 | 140.860 | -19.140 | 1 |
-| 15 | Paris 1er Arrondissement | 328 | 217.172 | -110.828 | 1 |
-| 16 | Paris 14e Arrondissement | 437 | 318.618 | -118.382 | 0 |
-| 17 | Paris 12e Arrondissement | 365 | 246.017 | -118.983 | 2 |
-| 18 | Paris 5e Arrondissement | 319 | 169.577 | -149.423 | 1 |
-| 19 | Paris 10e Arrondissement | 386 | 203.789 | -182.211 | 1 |
-| 20 | Paris 13e Arrondissement | 953 | 468.054 | -484.946 | 0 |
+| Métrique | MLP (phase 2) | Baseline linéaire |
+| --- | ---: | ---: |
+| R² train | 0.631 | 0.395 (in-sample) |
+| RMSE test | 207.1 | — |
+| LOOCV RMSE | 261.1 | 793.0 |
+| LOOCV MAE | 215.4 | 407.1 |
+
+**Interprétation :** Le MLP affiche un R² train plus élevé (sur-apprentissage), mais une RMSE LOOCV de 261 vs 793 pour la baseline. Cette comparaison doit être interprétée avec prudence : avec 20 observations, les deux modèles sont hors de leur domaine de validité statistique. La baseline linéaire simple (sans clustering) serait probablement plus stable.
+
+---
 
 ## Conclusion
 
-Le pipeline primaire suit maintenant strictement la logique pedagogique attendue : 20 arrondissements, clustering KMeans, variables indicatrices, puis regression lineaire multiple.
+La phase 2 implémente le pipeline complet `X/y → train/test split → MLPRegressor → évaluation`. Les résultats confirment la limitation documentée dans le plan : la maille arrondissement (20 observations) est insuffisante pour un réseau de neurones. Ce pipeline reste un exemple pédagogique illustrant le sur-apprentissage, la nécessité du LOOCV avec des jeux de données très petits, et la comparaison rigoureuse avec une baseline.

@@ -212,6 +212,22 @@ DATA_SOURCES = {
     },
 }
 
+PHASE2_FEATURE_COLUMNS = [
+    "x1_population",
+    "x2_commerce_restaurant_count",
+    "x3_transport_station_count",
+    "x4_green_area_m2",
+    "x5_road_length_km",
+]
+PHASE2_TARGET_COLUMN = "y_bin_count"
+PHASE2_TEST_SIZE = 0.2
+PHASE2_RANDOM_STATE = 42
+MLP_HIDDEN_LAYER_SIZES = (8, 4)
+MLP_ACTIVATION = "relu"
+MLP_SOLVER = "adam"
+MLP_ALPHA = 0.001
+MLP_MAX_ITER = 5000
+
 PEDAGOGICAL_DATASET_NAMES = [
     "street_bins_osm_arr",
     "commerce_restaurants_osm",
