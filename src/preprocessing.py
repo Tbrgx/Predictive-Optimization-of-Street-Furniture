@@ -133,6 +133,8 @@ def build_master_arrondissements(
     transport_gdf: gpd.GeoDataFrame,
     green_gdf: gpd.GeoDataFrame,
     roads_gdf: gpd.GeoDataFrame,
+    terrasses_df: pd.DataFrame,
+    schools_df: pd.DataFrame,
 ) -> gpd.GeoDataFrame:
     """Build the arrondissement-level pedagogical feature table."""
     arr = ensure_target_crs(arr_gdf).copy()
@@ -161,6 +163,8 @@ def build_master_arrondissements(
     master = master.merge(transport_counts, on="arrondissement_code", how="left")
     master = master.merge(green_area, on="arrondissement_code", how="left")
     master = master.merge(road_length, on="arrondissement_code", how="left")
+    master = master.merge(terrasses_df, on="arrondissement_code", how="left")
+    master = master.merge(schools_df, on="arrondissement_code", how="left")
 
     fill_zero_columns = [
         "x1_population",
@@ -169,6 +173,8 @@ def build_master_arrondissements(
         "x3_transport_station_count",
         "x4_green_area_m2",
         "x5_road_length_km",
+        "x6_terrasse_surface_m2",
+        "x7_school_count",
     ]
     for column in fill_zero_columns:
         master[column] = pd.to_numeric(master[column], errors="coerce").fillna(0.0)
@@ -177,6 +183,7 @@ def build_master_arrondissements(
         "y_bin_count",
         "x2_commerce_restaurant_count",
         "x3_transport_station_count",
+        "x7_school_count",
     ]
     for column in integer_columns:
         master[column] = master[column].round().astype(int)
@@ -184,6 +191,7 @@ def build_master_arrondissements(
     master["x1_population"] = master["x1_population"].astype(float)
     master["x4_green_area_m2"] = master["x4_green_area_m2"].astype(float)
     master["x5_road_length_km"] = master["x5_road_length_km"].astype(float)
+    master["x6_terrasse_surface_m2"] = master["x6_terrasse_surface_m2"].astype(float)
 
     expected_columns = [
         "arrondissement_code",
@@ -195,6 +203,8 @@ def build_master_arrondissements(
         "x3_transport_station_count",
         "x4_green_area_m2",
         "x5_road_length_km",
+        "x6_terrasse_surface_m2",
+        "x7_school_count",
     ]
     master = master[expected_columns].sort_values("arrondissement_code").reset_index(drop=True)
     return master

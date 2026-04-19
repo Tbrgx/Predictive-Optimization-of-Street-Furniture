@@ -343,3 +343,59 @@ def load_dataset(name: str) -> LoadedDataset:
         return gpd.read_file(dataset_path)
 
     raise ValueError(f"Unsupported file format '{file_format}' for dataset '{name}'.")
+
+
+def load_terrasses_for_arrondissements(
+    csv_path: Optional[Union[str, Path]] = None,
+) -> pd.DataFrame:
+    """Charge les terrasses autorisees et calcule la surface totale (m2) par arrondissement."""
+    dataset_path = _resolve_dataset_path("terrasses_autorisations", csv_path)
+    read_kwargs = DATA_SOURCES["terrasses_autorisations"].get("read_csv_kwargs", {})
+    df = pd.read_csv(dataset_path, **read_kwargs)
+
+    df["longueur"] = pd.to_numeric(df["longueur"], errors="coerce").fillna(0.0)
+    df["largeur"] = pd.to_numeric(df["largeur"], errors="coerce").fillna(0.0)
+    df["surface_m2"] = df["longueur"] * df["largeur"]
+
+    df = df.loc[df["arrondissement"].notna()].copy()
+    df["arrondissement_code"] = df["arrondissement"].astype(str).str[-2:]
+
+    aggregated = (
+        df.groupby("arrondissement_code", as_index=False)["surface_m2"]
+        .sum()
+        .rename(columns={"surface_m2": "x6_terrasse_surface_m2"})
+    )
+    return aggregated
+
+
+def load_schools_for_arrondissements(
+    colleges_path: Optional[Union[str, Path]] = None,
+    elementaires_path: Optional[Union[str, Path]] = None,
+    maternelles_path: Optional[Union[str, Path]] = None,
+) -> pd.DataFrame:
+    """Charge les 3 types d'etablissements scolaires, filtre la derniere annee scolaire, et renvoie un comptage par arrondissement."""
+    sources = [
+        ("etablissements_scolaires_colleges", colleges_path),
+        ("etablissements_scolaires_elementaires", elementaires_path),
+        ("etablissements_scolaires_maternelles", maternelles_path),
+    ]
+    frames = []
+    for dataset_name, override_path in sources:
+        path = _resolve_dataset_path(dataset_name, override_path)
+        read_kwargs = DATA_SOURCES[dataset_name].get("read_csv_kwargs", {})
+        df = pd.read_csv(path, **read_kwargs, dtype={"arr_insee": "string"})
+        df = df.loc[df["annee_scol"].notna()].copy()
+        latest = df["annee_scol"].max()
+        df = df.loc[df["annee_scol"] == latest].copy()
+        df = df.loc[df["arr_insee"].notna()].copy()
+        df["arrondissement_code"] = df["arr_insee"].astype(str).str.zfill(5).str[-2:]
+        frames.append(df[["arrondissement_code"]])
+
+    all_schools = pd.concat(frames, ignore_index=True)
+    aggregated = (
+        all_schools.groupby("arrondissement_code")
+        .size()
+        .rename("x7_school_count")
+        .reset_index()
+    )
+    return aggregated

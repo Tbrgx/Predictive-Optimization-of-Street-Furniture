@@ -26,6 +26,8 @@ BUSINESS_FEATURE_COLUMNS = [
     "x3_transport_station_count",
     "x4_green_area_m2",
     "x5_road_length_km",
+    "x6_terrasse_surface_m2",
+    "x7_school_count",
 ]
 
 IRIS_WFS_BASE_URL = "https://data.geopf.fr/wfs/ows"
@@ -200,6 +202,46 @@ DATA_SOURCES = {
         "read_csv_kwargs": {"sep": ";"},
         "status": "primary",
     },
+    "terrasses_autorisations": {
+        "name": "Terrasses et etalages - Autorisations",
+        "url": "https://opendata.paris.fr/api/explore/v2.1/catalog/datasets/terrasses-autorisations/exports/csv",
+        "license": "ODbL",
+        "description": "Surface de terrasses autorisees par arrondissement pour la variable X6.",
+        "file_format": "csv",
+        "local_filename": "terrasses_autorisations.csv",
+        "read_csv_kwargs": {"sep": ";"},
+        "status": "primary",
+    },
+    "etablissements_scolaires_colleges": {
+        "name": "Etablissements scolaires - Colleges",
+        "url": "https://opendata.paris.fr/api/explore/v2.1/catalog/datasets/etablissements-scolaires-colleges/exports/csv",
+        "license": "ODbL",
+        "description": "Localisation des colleges parisiens pour la variable X7.",
+        "file_format": "csv",
+        "local_filename": "etablissements_colleges.csv",
+        "read_csv_kwargs": {"sep": ";"},
+        "status": "primary",
+    },
+    "etablissements_scolaires_elementaires": {
+        "name": "Etablissements scolaires - Ecoles elementaires",
+        "url": "https://opendata.paris.fr/api/explore/v2.1/catalog/datasets/etablissements-scolaires-ecoles-elementaires/exports/csv",
+        "license": "ODbL",
+        "description": "Localisation des ecoles elementaires pour la variable X7.",
+        "file_format": "csv",
+        "local_filename": "etablissements_elementaires.csv",
+        "read_csv_kwargs": {"sep": ";"},
+        "status": "primary",
+    },
+    "etablissements_scolaires_maternelles": {
+        "name": "Etablissements scolaires - Ecoles maternelles",
+        "url": "https://opendata.paris.fr/api/explore/v2.1/catalog/datasets/etablissements-scolaires-maternelles/exports/csv",
+        "license": "ODbL",
+        "description": "Localisation des maternelles pour la variable X7.",
+        "file_format": "csv",
+        "local_filename": "etablissements_maternelles.csv",
+        "read_csv_kwargs": {"sep": ";"},
+        "status": "primary",
+    },
     "trilib_stations": {
         "name": "Stations Trilib' (legacy)",
         "url": "https://opendata.paris.fr/api/explore/v2.1/catalog/datasets/dechets-menagers-points-dapport-volontaire-stations-trilib/exports/csv",
@@ -218,6 +260,8 @@ PHASE2_FEATURE_COLUMNS = [
     "x3_transport_station_count",
     "x4_green_area_m2",
     "x5_road_length_km",
+    "x6_terrasse_surface_m2",
+    "x7_school_count",
 ]
 PHASE2_TARGET_COLUMN = "y_bin_count"
 PHASE2_TEST_SIZE = 0.2
@@ -236,4 +280,8 @@ PEDAGOGICAL_DATASET_NAMES = [
     "iris_contours",
     "iris_population",
     "green_spaces",
+    "terrasses_autorisations",
+    "etablissements_scolaires_colleges",
+    "etablissements_scolaires_elementaires",
+    "etablissements_scolaires_maternelles",
 ]

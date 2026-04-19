@@ -49,6 +49,8 @@ from src.data_loader import (
     load_dataset,
     load_green_spaces_for_arrondissements,
     load_population_for_arrondissements,
+    load_schools_for_arrondissements,
+    load_terrasses_for_arrondissements,
     parse_overpass_lines,
     parse_overpass_points,
 )
@@ -193,6 +195,12 @@ def build_pedagogical_master_table(force_download: bool = False) -> gpd.GeoDataF
     roads_gdf = parse_overpass_lines(RAW_DATA_DIR / "roads_osm.json")
     population_df = load_population_for_arrondissements(RAW_DATA_DIR / "iris_population_2022.csv.zip")
     green_gdf = load_green_spaces_for_arrondissements(RAW_DATA_DIR / "green_spaces.csv")
+    terrasses_df = load_terrasses_for_arrondissements(RAW_DATA_DIR / "terrasses_autorisations.csv")
+    schools_df = load_schools_for_arrondissements(
+        colleges_path=RAW_DATA_DIR / "etablissements_colleges.csv",
+        elementaires_path=RAW_DATA_DIR / "etablissements_elementaires.csv",
+        maternelles_path=RAW_DATA_DIR / "etablissements_maternelles.csv",
+    )
 
     arr_gdf = build_arrondissement_boundaries_from_iris(iris_gdf)
     master_gdf = build_master_arrondissements(
@@ -203,6 +211,8 @@ def build_pedagogical_master_table(force_download: bool = False) -> gpd.GeoDataF
         transport_gdf=transport_gdf,
         green_gdf=green_gdf,
         roads_gdf=roads_gdf,
+        terrasses_df=terrasses_df,
+        schools_df=schools_df,
     )
     return master_gdf
 
