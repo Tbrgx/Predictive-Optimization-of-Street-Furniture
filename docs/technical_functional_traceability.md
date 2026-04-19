@@ -1,6 +1,6 @@
 # Technical and Functional Traceability
 
-Date de consolidation : 2026-03-13
+Date de consolidation : 2026-03-13 — Revise le 2026-04-19 (ajout Phase 2 MLP + variables X6/X7)
 
 ## 1. Purpose
 
@@ -34,11 +34,12 @@ Le pipeline `IRIS + RandomForest/XGBoost` est conserve uniquement comme historiq
 Le projet doit maintenant produire :
 
 1. une table maitre de 20 arrondissements ;
-2. cinq variables explicatives `X1..X5` construites selon les consignes ;
-3. un clustering KMeans `K=3` ;
-4. une regression lineaire multiple avec variables indicatrices ;
-5. un classement prescriptif des 20 arrondissements ;
-6. une carte choropleth de priorite.
+2. sept variables explicatives `X1..X7` construites selon les consignes ;
+3. un clustering KMeans `K=3` (Phase 1 baseline) ;
+4. une regression lineaire multiple avec variables indicatrices (Phase 1 baseline) ;
+5. un reseau de neurones `MLPRegressor` avec train/test split et LOOCV (Phase 2 methode principale) ;
+6. un classement prescriptif des 20 arrondissements ;
+7. une carte choropleth de priorite.
 
 ## 4. Chronology of Implementations
 
@@ -80,6 +81,22 @@ Le projet doit maintenant produire :
 - regeneration des sorties `master_arrondissements`, coefficients, predictions, ranking et carte ;
 - reecriture des notebooks et de la documentation publique.
 
+## Sprint Phase 2 — Reseau de neurones (2026-04-19)
+
+- ajout des constantes `PHASE2_*` et `MLP_*` dans `config.py` ;
+- ajout des fonctions `create_feature_response_arrays`, `create_train_test_datasets`, `build_neural_network_pipeline`, `evaluate_regression_predictions`, `run_phase2_neural_network_pipeline` dans `src/modeling.py` ;
+- conservation du pipeline KMeans + LinearRegression comme baseline comparative ;
+- reecriture de `notebooks/02_modeling.ipynb` pour les etapes 3 a 5 ;
+- ajout des visualisations EDA dans `notebooks/01_data_exploration.ipynb`.
+
+## Sprint X6/X7 — Variables terrasses et scolaires (2026-04-19)
+
+- ajout de 4 sources dans `DATA_SOURCES` : `terrasses_autorisations`, `etablissements_scolaires_colleges`, `_elementaires`, `_maternelles` ;
+- extension de `BUSINESS_FEATURE_COLUMNS` et `PHASE2_FEATURE_COLUMNS` a 7 colonnes ;
+- ajout de `load_terrasses_for_arrondissements` et `load_schools_for_arrondissements` dans `src/data_loader.py` ;
+- extension de `build_master_arrondissements` dans `src/preprocessing.py` ;
+- cablage dans `build_pedagogical_master_table` dans `src/modeling.py`.
+
 ## 5. Primary Technical Design
 
 ## 5.1 Variable target
@@ -107,6 +124,14 @@ Le projet doit maintenant produire :
 - `X5 = x5_road_length_km`
   - source : OSM
   - definition : routes structurantes et locales, hors `footway`, `path`, `cycleway`, `steps`
+- `X6 = x6_terrasse_surface_m2`
+  - source : OpenData Paris `terrasses-autorisations`
+  - definition : SUM(longueur x largeur) des terrasses autorisees par arrondissement
+  - agregation : somme des surfaces en m2
+- `X7 = x7_school_count`
+  - source : OpenData Paris (colleges + ecoles elementaires + ecoles maternelles)
+  - definition : comptage consolide des etablissements scolaires, filtre sur la derniere annee scolaire disponible
+  - agregation : COUNT(*) par arrondissement, somme des 3 types
 
 ## 5.3 Geographic unit
 
@@ -121,7 +146,7 @@ Controles implementes :
 
 ## 5.4 Clustering and regression
 
-- standardisation de `X1..X5` ;
+- standardisation de `X1..X7` ;
 - `KMeans(n_clusters=3, random_state=42, n_init=20)` ;
 - creation des variables `cl_2` et `cl_3` avec `drop_first=True` ;
 - `LinearRegression()` sur les 20 arrondissements ;
@@ -150,6 +175,10 @@ Controles implementes :
 - `data/raw/iris_contours_paris.geojson`
 - `data/raw/iris_population_2022.csv.zip`
 - `data/raw/green_spaces.csv`
+- `data/raw/terrasses_autorisations.csv` (ajout 2026-04-19)
+- `data/raw/etablissements_colleges.csv` (ajout 2026-04-19)
+- `data/raw/etablissements_elementaires.csv` (ajout 2026-04-19)
+- `data/raw/etablissements_maternelles.csv` (ajout 2026-04-19)
 
 ### Processed datasets
 
@@ -167,6 +196,15 @@ Controles implementes :
 - `outputs/tables/arrondissement_priority_ranking.csv`
 - `outputs/tables/pedagogical_model_summary.json`
 - `outputs/priority_map.html`
+- `outputs/tables/phase2_feature_matrix.csv` (Phase 2)
+- `outputs/tables/phase2_target_vector.csv` (Phase 2)
+- `outputs/tables/phase2_train_test_summary.csv` (Phase 2)
+- `outputs/tables/neural_network_predictions.csv` (Phase 2)
+- `outputs/tables/neural_network_metrics.csv` (Phase 2)
+- `outputs/tables/linear_regression_baseline_metrics.csv` (Phase 2)
+- `outputs/figures/y_vs_features_scatterplots.png`
+- `outputs/figures/neural_network_actual_vs_predicted.png`
+- `outputs/figures/neural_network_residuals.png`
 
 ## 7. Main Technical Choices and Justifications
 

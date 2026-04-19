@@ -5,7 +5,7 @@ Le pipeline suit la consigne pedagogique en deux phases :
 
 - unite d'analyse = 20 arrondissements ;
 - cible `Y` = nombre brut de corbeilles OSM par arrondissement ;
-- variables explicatives `X1..X5` = population, commerces/restaurants, stations de transport, espaces verts, longueur de routes ;
+- variables explicatives `X1..X7` = population, commerces/restaurants, stations de transport, espaces verts, longueur de routes, surface de terrasses autorisees, etablissements scolaires ;
 - **Phase 1 (baseline)** : clustering `KMeans (K=3)` + variables indicatrices + `LinearRegression` ;
 - **Phase 2 (methode principale)** : `MLPRegressor` (reseau de neurones, sklearn) avec split train/test et LOOCV.
 
@@ -47,8 +47,8 @@ paris-bins-ml/
 
 1. Telecharger ou reutiliser les jeux de donnees pedagogiques.
 2. Construire 20 polygones d'arrondissement par dissolution des contours IRIS.
-3. Agreger la cible `Y` et les variables `X1..X5` a l'echelle arrondissement.
-4. Creer les arrays `X (20, 5)` et `y (20,)`.
+3. Agreger la cible `Y` et les variables `X1..X7` a l'echelle arrondissement.
+4. Creer les arrays `X (20, 7)` et `y (20,)`.
 5. Separer en train (16 obs) et test (4 obs) avec `train_test_split(test_size=0.2, random_state=42)`.
 6. Entrainer `MLPRegressor(hidden_layer_sizes=(8,4), activation='relu', solver='adam')` via un `Pipeline` avec `StandardScaler`.
 7. Evaluer les predictions sur train, test et en LOOCV.
@@ -58,7 +58,7 @@ paris-bins-ml/
 ## Pipeline Phase 1 (baseline comparative)
 
 1-3. Identique a la phase 2.
-4. Standardiser `X1..X5`, estimer `KMeans(n_clusters=3)`, puis creer `cl_2` et `cl_3`.
+4. Standardiser `X1..X7`, estimer `KMeans(n_clusters=3)`, puis creer `cl_2` et `cl_3`.
 5. Entrainement d'une `LinearRegression` sur 20 observations.
 6. Calcul du score prescriptif `priority_score = y_predicted - y_observed`.
 
@@ -149,6 +149,16 @@ La trace de migration et d'audit est dans [docs/technical_functional_traceabilit
   - URL : `https://data.geopf.fr/wfs/ows`
   - Licence : Licence Ouverte / Open Licence
   - Usage : construction des 20 arrondissements
+- `terrasses_autorisations`
+  - Source : Direction de l'Urbanisme - Ville de Paris
+  - URL : `https://opendata.paris.fr/explore/dataset/terrasses-autorisations/`
+  - Licence : ODbL
+  - Usage : `X6`, surface totale des terrasses autorisees (SUM longueur x largeur)
+- `etablissements_scolaires_colleges` / `_elementaires` / `_maternelles`
+  - Source : Direction des Affaires Scolaires - Ville de Paris
+  - URL : `https://opendata.paris.fr/explore/dataset/etablissements-scolaires-*/`
+  - Licence : ODbL
+  - Usage : `X7`, comptage consolide des etablissements scolaires (derniere annee scolaire)
 
 ## Methodological Note
 

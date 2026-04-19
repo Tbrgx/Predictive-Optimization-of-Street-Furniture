@@ -358,7 +358,10 @@ def load_terrasses_for_arrondissements(
     df["surface_m2"] = df["longueur"] * df["largeur"]
 
     df = df.loc[df["arrondissement"].notna()].copy()
-    df["arrondissement_code"] = df["arrondissement"].astype(str).str[-2:]
+    arr_num = pd.to_numeric(df["arrondissement"], errors="coerce")
+    df = df.loc[arr_num.notna()].copy()
+    arr_num = arr_num.loc[df.index]
+    df["arrondissement_code"] = arr_num.astype(int).astype(str).str[-2:].str.zfill(2)
 
     aggregated = (
         df.groupby("arrondissement_code", as_index=False)["surface_m2"]
@@ -388,6 +391,7 @@ def load_schools_for_arrondissements(
         latest = df["annee_scol"].max()
         df = df.loc[df["annee_scol"] == latest].copy()
         df = df.loc[df["arr_insee"].notna()].copy()
+        df = df.loc[df["arr_insee"].astype(str).str.startswith("75")].copy()
         df["arrondissement_code"] = df["arr_insee"].astype(str).str.zfill(5).str[-2:]
         frames.append(df[["arrondissement_code"]])
 

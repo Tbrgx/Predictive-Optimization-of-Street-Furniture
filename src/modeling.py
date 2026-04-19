@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+from datetime import datetime
 from pathlib import Path
 import sys
 from typing import Any
@@ -242,13 +243,13 @@ def write_modeling_report(
     report_lines = [
         "# Modeling Report",
         "",
-        "Date d'execution : 2026-03-13",
+        f"Date d'execution : {datetime.now().strftime('%Y-%m-%d')}",
         "",
         "## Cadrage pedagogique",
         "",
         "- Unite d'analyse : arrondissement (20 observations)",
         f"- Variable cible Y : `{PEDAGOGICAL_TARGET_COLUMN}` = nombre brut de corbeilles OSM par arrondissement",
-        "- Variables explicatives : X1 population, X2 commerces/restaurants, X3 stations de transport, X4 superficie d'espaces verts, X5 longueur de routes",
+        "- Variables explicatives : X1 population, X2 commerces/restaurants, X3 stations de transport, X4 superficie d'espaces verts, X5 longueur de routes, X6 surface de terrasses autorisees, X7 nombre d'etablissements scolaires",
         "- Etape 2 : KMeans avec K=3",
         "- Etape 3 : One-Hot Encoding avec `drop_first=True` pour produire `cl_2` et `cl_3`",
         "- Etape 4 : LinearRegression",
@@ -262,6 +263,8 @@ def write_modeling_report(
         "| `x3_transport_station_count` | Comptage OSM des stations de transport |",
         "| `x4_green_area_m2` | Surface totale d'espaces verts en m2 |",
         "| `x5_road_length_km` | Longueur totale des routes OSM en km |",
+        "| `x6_terrasse_surface_m2` | Surface totale des terrasses autorisees (longueur x largeur) en m2 |",
+        "| `x7_school_count` | Nombre total d'etablissements scolaires (colleges + elementaires + maternelles) |",
         "| `cl_2`, `cl_3` | Variables indicatrices des clusters KMeans |",
         "",
         "## Clusters d'arrondissements",
@@ -273,7 +276,8 @@ def write_modeling_report(
             f"- Cluster {row.cluster_label} : size={int(row.cluster_size)}, "
             f"X1={row.x1_population:.1f}, X2={row.x2_commerce_restaurant_count:.1f}, "
             f"X3={row.x3_transport_station_count:.1f}, X4={row.x4_green_area_m2:.1f}, "
-            f"X5={row.x5_road_length_km:.3f}"
+            f"X5={row.x5_road_length_km:.3f}, X6={row.x6_terrasse_surface_m2:.1f}, "
+            f"X7={row.x7_school_count:.1f}"
         )
 
     report_lines.extend(
@@ -482,7 +486,7 @@ def run_pedagogical_regression_pipeline(force_download: bool = False) -> dict[st
 
 
 def create_feature_response_arrays(master_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
-    """Select X1..X5 features and y_bin_count target; validate types and NaN absence."""
+    """Select X1..X7 features and y_bin_count target; validate types and NaN absence."""
     X = master_df[PHASE2_FEATURE_COLUMNS].copy()
     y = master_df[PHASE2_TARGET_COLUMN].copy()
 
@@ -542,14 +546,19 @@ def evaluate_regression_predictions(y_true: pd.Series, y_pred: np.ndarray) -> di
 
 def _plot_y_vs_features(X: pd.DataFrame, y: pd.Series) -> None:
     """Save scatterplots of y vs each X feature."""
-    fig, axes = plt.subplots(1, 5, figsize=(20, 4))
-    feature_labels = ["X1 Population", "X2 Commerce/Restaurants", "X3 Transport Stations", "X4 Green Area (m²)", "X5 Road Length (km)"]
+    feature_labels = [
+        "X1 Population", "X2 Commerce/Restaurants", "X3 Transport Stations",
+        "X4 Green Area (m2)", "X5 Road Length (km)",
+        "X6 Terrasse Surface (m2)", "X7 School Count",
+    ]
+    n = len(PHASE2_FEATURE_COLUMNS)
+    fig, axes = plt.subplots(1, n, figsize=(n * 4, 4))
     for ax, col, label in zip(axes, PHASE2_FEATURE_COLUMNS, feature_labels):
         ax.scatter(X[col], y, color="steelblue", edgecolors="white", linewidths=0.5)
         ax.set_xlabel(label, fontsize=9)
         ax.set_ylabel("Y (bin count)" if ax == axes[0] else "")
         ax.set_title(f"Y vs {label.split()[0]}", fontsize=10)
-    fig.suptitle("Scatterplots: Y (bin count) vs X1..X5", fontsize=12, fontweight="bold")
+    fig.suptitle(f"Scatterplots: Y (bin count) vs X1..X{n}", fontsize=12, fontweight="bold")
     fig.tight_layout()
     fig.savefig(FIGURES_DIR / "y_vs_features_scatterplots.png", dpi=150, bbox_inches="tight")
     plt.close(fig)
