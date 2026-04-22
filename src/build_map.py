@@ -19,7 +19,12 @@ def build_arrondissement_priority_map(
     master_geojson_path: Path | None = None,
     ranking_csv_path: Path | None = None,
 ) -> Path:
-    """Build the pedagogical arrondissement priority choropleth map."""
+    """Build the pedagogical arrondissement priority choropleth map.
+
+    La carte est un fichier HTML autonome (aucun serveur requis) qui intègre
+    les données GeoJSON, les styles et la bibliothèque Folium/Leaflet en inline.
+    Elle peut être ouverte directement dans n'importe quel navigateur.
+    """
     master_path = master_geojson_path or PROCESSED_DATA_DIR / "master_arrondissements.geojson"
     ranking_path = ranking_csv_path or TABLES_DIR / "arrondissement_priority_ranking.csv"
 
@@ -42,15 +47,23 @@ def build_arrondissement_priority_map(
     if len(map_gdf) != 20:
         raise ValueError("The arrondissement map must contain exactly 20 polygons.")
 
+    # Calcul du centroïde géographique réel de Paris pour centrer la carte,
+    # plutôt qu'une coordonnée codée en dur qui deviendrait incorrecte si le GeoJSON change.
     center = map_gdf.to_crs("EPSG:4326").union_all().centroid
     fmap = folium.Map(
         location=[center.y, center.x],
         zoom_start=11,
+        # CartoDB positron : fond clair et minimaliste qui ne concurrence pas
+        # les couleurs du choropleth.
         tiles="CartoDB positron",
     )
 
     priority_min = float(map_gdf["priority_score"].min())
     priority_max = float(map_gdf["priority_score"].max())
+    # Palette divergente centrée sur 0 :
+    #   bleu  (#2B6CB0) = surplus  → le modèle prédit MOINS que l'observé
+    #   blanc (#F7FAFC) = neutre   → prédiction proche de l'observé
+    #   rouge (#C53030) = déficit  → le modèle prédit PLUS que l'observé
     colormap = cm.LinearColormap(
         colors=["#2B6CB0", "#F7FAFC", "#C53030"],
         vmin=priority_min,
@@ -61,6 +74,7 @@ def build_arrondissement_priority_map(
 
     def style_function(feature: dict) -> dict[str, float | str]:
         priority_score = feature["properties"].get("priority_score")
+        # Gris neutre si le score est manquant (ne devrait pas arriver avec 20 arrondissements complets)
         fill_color = "#d9d9d9" if priority_score is None else colormap(priority_score)
         return {
             "fillColor": fill_color,

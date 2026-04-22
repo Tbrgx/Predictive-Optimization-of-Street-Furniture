@@ -1,6 +1,12 @@
 from pathlib import Path
 
 
+# ---------------------------------------------------------------------------
+# Chemins du projet
+# Tous les scripts importent ces constantes plutôt que de construire leurs
+# propres chemins, ce qui garantit la cohérence entre les modules.
+# ---------------------------------------------------------------------------
+
 PROJECT_ROOT = Path(__file__).resolve().parent
 DATA_DIR = PROJECT_ROOT / "data"
 RAW_DATA_DIR = DATA_DIR / "raw"
@@ -15,11 +21,25 @@ NOTEBOOKS_DIR = PROJECT_ROOT / "notebooks"
 DOCS_DIR = PROJECT_ROOT / "docs"
 SRC_DIR = PROJECT_ROOT / "src"
 
-CRS_TARGET = "EPSG:4326"
-IRIS_DEPT_FILTER = "75"
+# ---------------------------------------------------------------------------
+# Paramètres géospatiaux partagés
+# ---------------------------------------------------------------------------
 
+# Système de coordonnées cible pour toutes les couches géographiques.
+# EPSG:4326 = WGS84 (lat/lon) — format standard des APIs REST et GeoJSON.
+CRS_TARGET = "EPSG:4326"
+IRIS_DEPT_FILTER = "75"  # code département Paris
+
+# ---------------------------------------------------------------------------
+# Paramètres de modélisation — Phase 1 (baseline pédagogique)
+# ---------------------------------------------------------------------------
+
+# K=3 est imposé par la consigne pédagogique (pas optimisé par silhouette/elbow).
 PEDAGOGICAL_CLUSTER_COUNT = 3
 PEDAGOGICAL_TARGET_COLUMN = "y_bin_count"
+
+# Les 7 variables explicatives du modèle, dans l'ordre canonique.
+# Cet ordre est utilisé pour la matrice de features, les coefficients et les exports.
 BUSINESS_FEATURE_COLUMNS = [
     "x1_population",
     "x2_commerce_restaurant_count",
@@ -29,6 +49,13 @@ BUSINESS_FEATURE_COLUMNS = [
     "x6_terrasse_surface_m2",
     "x7_school_count",
 ]
+
+# ---------------------------------------------------------------------------
+# Source IRIS — IGN / GeoPF (WFS)
+# Les contours d'arrondissements sont reconstruits par dissolution des IRIS,
+# ce qui évite d'introduire une source externe supplémentaire et garantit
+# la cohérence parfaite avec les jointures spatiales.
+# ---------------------------------------------------------------------------
 
 IRIS_WFS_BASE_URL = "https://data.geopf.fr/wfs/ows"
 IRIS_WFS_LAYER = "STATISTICALUNITS.IRISGE:iris_ge"
@@ -42,9 +69,18 @@ IRIS_WFS_URL = (
     f"&CQL_FILTER={IRIS_WFS_FILTER_ENCODED}"
 )
 
+# ---------------------------------------------------------------------------
+# Requêtes Overpass (OpenStreetMap)
+# Chaque requête cible la zone administrative de Paris via `area["name"="Paris"]`.
+# La syntaxe `node + way + relation` couvre tous les types d'objets OSM,
+# et `out center` renvoie les coordonnées du centroïde pour les ways et relations.
+# ---------------------------------------------------------------------------
+
 OSM_OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+# Sélecteur de zone réutilisé dans les 4 requêtes ci-dessous.
 OSM_PARIS_AREA_QUERY = 'area["name"="Paris"]["boundary"="administrative"]["admin_level"="8"]->.a;'
 
+# Variable cible Y : toutes les corbeilles de rue OSM dans Paris.
 OSM_WASTE_BASKET_ARR_QUERY = f"""
 [out:json][timeout:120];
 {OSM_PARIS_AREA_QUERY}
@@ -56,6 +92,9 @@ OSM_WASTE_BASKET_ARR_QUERY = f"""
 out center;
 """.strip()
 
+# Variable X2 : commerces et restauration.
+# `shop` sans valeur = tous les types de commerces ; la liste `amenity` restreint
+# aux catégories de restauration pertinentes (pas les stations-service, hôpitaux, etc.)
 OSM_COMMERCE_RESTAURANTS_QUERY = f"""
 [out:json][timeout:180];
 {OSM_PARIS_AREA_QUERY}
@@ -70,6 +109,9 @@ OSM_COMMERCE_RESTAURANTS_QUERY = f"""
 out center;
 """.strip()
 
+# Variable X3 : stations de transport hors métro.
+# `subway_entrance` est explicitement exclu car ce sont des entrées (pas des stations),
+# et leur comptage serait disproportionné dans les arrondissements centraux.
 OSM_TRANSPORT_STATIONS_QUERY = f"""
 [out:json][timeout:180];
 {OSM_PARIS_AREA_QUERY}
@@ -87,12 +129,26 @@ OSM_TRANSPORT_STATIONS_QUERY = f"""
 out center;
 """.strip()
 
+# Variable X5 : longueur de voirie.
+# `out geom` est nécessaire (à la différence de `out center`) pour récupérer
+# la géométrie complète des ways et calculer leur longueur réelle.
+# Les voies piétonnes/cyclables sont exclues car elles ne génèrent pas de flux
+# de déchets comparables à la voirie motorisée.
 OSM_ROADS_QUERY = f"""
 [out:json][timeout:240];
 {OSM_PARIS_AREA_QUERY}
 way(area.a)["highway"~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|service|pedestrian)$"];
 out geom;
 """.strip()
+
+# ---------------------------------------------------------------------------
+# Catalogue des sources de données
+# Design "déclaratif" : ajouter/désactiver une source sans toucher au code
+# de téléchargement. Le champ `status` contrôle l'inclusion dans le pipeline :
+#   - "primary"  : téléchargé et utilisé
+#   - "legacy"   : ignoré par le pipeline pédagogique
+#   - "blocked"  : source inspectée mais inutilisable (voir data_and_sources.md §3)
+# ---------------------------------------------------------------------------
 
 DATA_SOURCES = {
     "street_bins": {
@@ -179,6 +235,7 @@ DATA_SOURCES = {
         "wfs_layer": IRIS_WFS_LAYER,
         "wfs_filter": IRIS_WFS_FILTER,
         "timeout_seconds": 120,
+        # URL de secours sur data.gouv.fr en cas d'indisponibilité du WFS IGN.
         "fallback_url": "https://www.data.gouv.fr/api/1/datasets/r/eac194ba-c917-4b25-a53b-0e4cf43312f2",
         "status": "primary",
     },
@@ -254,6 +311,13 @@ DATA_SOURCES = {
     },
 }
 
+# ---------------------------------------------------------------------------
+# Paramètres de modélisation — Phase 2 (réseau de neurones MLPRegressor)
+# Phase 2 n'est pas appelée par main.py ; elle s'exécute depuis les notebooks
+# ou via run_phase2_neural_network_pipeline() directement.
+# ---------------------------------------------------------------------------
+
+# Phase 2 utilise les mêmes features que Phase 1 (X1..X7), sans les dummies KMeans.
 PHASE2_FEATURE_COLUMNS = [
     "x1_population",
     "x2_commerce_restaurant_count",
@@ -264,13 +328,24 @@ PHASE2_FEATURE_COLUMNS = [
     "x7_school_count",
 ]
 PHASE2_TARGET_COLUMN = "y_bin_count"
+# 20% = 4 observations en test sur 20 au total — split minimal acceptable.
 PHASE2_TEST_SIZE = 0.2
+# Graine fixe pour la reproductibilité du split et de l'initialisation du réseau.
 PHASE2_RANDOM_STATE = 42
+
+# Architecture MLP : deux couches cachées légères (8 → 4 neurones).
+# Volontairement sous-paramétré pour ne pas sur-ajuster sur 20 observations.
 MLP_HIDDEN_LAYER_SIZES = (8, 4)
 MLP_ACTIVATION = "relu"
 MLP_SOLVER = "adam"
+# alpha = coefficient de régularisation L2 (pénalise les grands poids).
 MLP_ALPHA = 0.001
+# max_iter élevé car adam sur petit jeu peut nécessiter beaucoup d'itérations.
 MLP_MAX_ITER = 5000
+
+# ---------------------------------------------------------------------------
+# Liste canonique des datasets à télécharger pour le pipeline pédagogique
+# ---------------------------------------------------------------------------
 
 PEDAGOGICAL_DATASET_NAMES = [
     "street_bins_osm_arr",

@@ -7,7 +7,14 @@ from config import CRS_TARGET
 
 
 def ensure_target_crs(geodf: gpd.GeoDataFrame, target_crs: str = CRS_TARGET) -> gpd.GeoDataFrame:
-    """Return a GeoDataFrame projected in the target CRS."""
+    """Return a GeoDataFrame projected in the target CRS.
+
+    Appelé systématiquement avant chaque opération spatiale pour prévenir les
+    erreurs silencieuses de superposition de couches dans des systèmes de
+    coordonnées incompatibles (ex. mélange WGS84 / Lambert-93).
+    Lever une erreur explicite si le CRS est absent est préférable à une
+    reprojection silencieuse incorrecte.
+    """
     if geodf.crs is None:
         raise ValueError("Input GeoDataFrame has no CRS defined.")
     if str(geodf.crs) == target_crs:
@@ -16,7 +23,18 @@ def ensure_target_crs(geodf: gpd.GeoDataFrame, target_crs: str = CRS_TARGET) -> 
 
 
 def build_arrondissement_boundaries_from_iris(iris_gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-    """Dissolve Paris IRIS polygons into the 20 arrondissement boundaries."""
+    """Dissolve Paris IRIS polygons into the 20 arrondissement boundaries.
+
+    Les contours d'arrondissements ne sont pas téléchargés comme couche externe.
+    Ils sont **reconstruits** par dissolution des ~992 IRIS parisiens, ce qui :
+    - évite d'introduire une source de données supplémentaire ;
+    - garantit la cohérence topologique parfaite avec les IRIS utilisés pour
+      les jointures spatiales (pas de micro-gaps ni d'overlaps aux frontières).
+
+    La validation stricte (exactement 20 lignes, codes 01–20, pas de géométrie
+    nulle) détecte toute anomalie de la source IGN avant qu'elle ne se propage
+    silencieusement dans le pipeline.
+    """
     iris = ensure_target_crs(iris_gdf)
     iris["code_insee"] = iris["code_insee"].astype(str).str.zfill(5)
     iris["nom_commune"] = iris["nom_commune"].astype(str)
@@ -26,6 +44,8 @@ def build_arrondissement_boundaries_from_iris(iris_gdf: gpd.GeoDataFrame) -> gpd
         .dissolve(by=["code_insee", "nom_commune"], as_index=False)
         .rename(columns={"nom_commune": "arrondissement_name"})
     )
+    # Les 2 derniers chiffres du code INSEE correspondent au numéro d'arrondissement :
+    # 75101 → "01", 75115 → "15", 75120 → "20"
     arr_gdf["arrondissement_code"] = arr_gdf["code_insee"].str[-2:]
     arr_gdf = arr_gdf[["arrondissement_code", "arrondissement_name", "code_insee", "geometry"]]
     arr_gdf = arr_gdf.sort_values("arrondissement_code").reset_index(drop=True)
@@ -47,7 +67,12 @@ def aggregate_points_to_arrondissement(
     arr_gdf: gpd.GeoDataFrame,
     value_name: str,
 ) -> pd.DataFrame:
-    """Spatially join points to arrondissements and count rows per arrondissement."""
+    """Spatially join points to arrondissements and count rows per arrondissement.
+
+    Le prédicat `within` (point strictement à l'intérieur du polygone) est plus
+    robuste que `intersects` pour les points ponctuels, car il évite de compter
+    un point positionné exactement sur une frontière dans deux arrondissements.
+    """
     if points_gdf.empty:
         return pd.DataFrame(columns=["arrondissement_code", value_name])
 
@@ -73,7 +98,20 @@ def aggregate_lines_length_to_arrondissement(
     arr_gdf: gpd.GeoDataFrame,
     value_name: str,
 ) -> pd.DataFrame:
-    """Intersect lines with arrondissements and sum their length in kilometers."""
+    """Intersect lines with arrondissements and sum their length in kilometers.
+
+    Contrairement aux points, les routes traversent souvent plusieurs arrondissements.
+    `gpd.overlay` découpe chaque tronçon aux frontières avant le calcul de longueur,
+    ce qui attribue à chaque arrondissement uniquement la portion qui lui appartient.
+
+    La reprojection en Lambert-93 (EPSG:2154) est obligatoire avant `.length` :
+    en WGS84 (degrés), `.length` renverrait des valeurs en degrés décimaux,
+    sans signification métrique. Lambert-93 est la projection officielle pour la
+    France métropolitaine et minimise les distorsions à l'échelle parisienne.
+
+    `keep_geom_type=False` permet de conserver les fragments MultiLineString
+    qui peuvent apparaître après découpe aux frontières d'arrondissement.
+    """
     if lines_gdf.empty:
         return pd.DataFrame(columns=["arrondissement_code", value_name])
 
@@ -88,8 +126,9 @@ def aggregate_lines_length_to_arrondissement(
     if intersections.empty:
         return pd.DataFrame(columns=["arrondissement_code", value_name])
 
+    # Reprojection Lambert-93 pour des longueurs en mètres
     intersections_l93 = intersections.to_crs("EPSG:2154")
-    intersections[value_name] = intersections_l93.geometry.length / 1_000
+    intersections[value_name] = intersections_l93.geometry.length / 1_000  # mètres → km
     aggregated = (
         intersections.groupby("arrondissement_code", as_index=False)[value_name]
         .sum()
@@ -101,7 +140,16 @@ def aggregate_green_area_to_arrondissement(
     green_gdf: gpd.GeoDataFrame,
     arr_gdf: gpd.GeoDataFrame,
 ) -> pd.DataFrame:
-    """Intersect green spaces with arrondissements and sum area in square meters."""
+    """Intersect green spaces with arrondissements and sum area in square meters.
+
+    Même principe que `aggregate_lines_length_to_arrondissement` mais pour les
+    surfaces. Un parc qui chevauche plusieurs arrondissements (ex. Bois de
+    Vincennes entre 12e et communes limitrophes) est découpé et la surface
+    comptée uniquement dans la portion parisienne concernée.
+
+    La reprojection Lambert-93 est obligatoire avant `.area` pour les mêmes
+    raisons que pour les longueurs (voir fonction précédente).
+    """
     if green_gdf.empty:
         return pd.DataFrame(columns=["arrondissement_code", "x4_green_area_m2"])
 
@@ -116,6 +164,7 @@ def aggregate_green_area_to_arrondissement(
     if intersections.empty:
         return pd.DataFrame(columns=["arrondissement_code", "x4_green_area_m2"])
 
+    # Reprojection Lambert-93 pour des surfaces en m²
     intersections_l93 = intersections.to_crs("EPSG:2154")
     intersections["x4_green_area_m2"] = intersections_l93.geometry.area
     aggregated = (
@@ -136,7 +185,17 @@ def build_master_arrondissements(
     terrasses_df: pd.DataFrame,
     schools_df: pd.DataFrame,
 ) -> gpd.GeoDataFrame:
-    """Build the arrondissement-level pedagogical feature table."""
+    """Build the arrondissement-level pedagogical feature table.
+
+    8 jointures LEFT JOIN successives sur `arrondissement_code`. Le LEFT JOIN
+    garantit que les 20 arrondissements sont toujours présents même si une source
+    ne couvre pas un arrondissement (ex. absence de données terrasses pour
+    un arrondissement). Les NaN résultants sont remplis à 0.
+
+    Les types sont forcés explicitement après l'assemblage pour éviter que les
+    NaN intermédiaires (float par défaut en pandas) ne corrompent les colonnes
+    de comptage entier (y_bin_count, x2, x3, x7).
+    """
     arr = ensure_target_crs(arr_gdf).copy()
 
     bins_counts = aggregate_points_to_arrondissement(bins_gdf, arr, "y_bin_count")
@@ -179,6 +238,7 @@ def build_master_arrondissements(
     for column in fill_zero_columns:
         master[column] = pd.to_numeric(master[column], errors="coerce").fillna(0.0)
 
+    # Forçage des types : les comptages discrets doivent être des entiers
     integer_columns = [
         "y_bin_count",
         "x2_commerce_restaurant_count",

@@ -9,6 +9,8 @@ from typing import Any
 
 import geopandas as gpd
 import matplotlib
+# Backend non-interactif requis pour l'export headless (sans serveur d'affichage).
+# Doit être défini avant tout import de matplotlib.pyplot.
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
@@ -63,6 +65,9 @@ from src.preprocessing import (
 
 PROCESSED_MASTER_CSV = PROCESSED_DATA_DIR / "master_arrondissements.csv"
 PROCESSED_MASTER_GEOJSON = PROCESSED_DATA_DIR / "master_arrondissements.geojson"
+# Les 9 colonnes de la matrice de régression : X1..X7 bruts + 2 dummies KMeans.
+# Les dummies remplacent le cluster_label catégoriel et évitent toute hypothèse
+# d'ordinalité entre les clusters.
 REGRESSION_COLUMNS = BUSINESS_FEATURE_COLUMNS + ["cl_2", "cl_3"]
 
 
@@ -85,12 +90,23 @@ def fit_arrondissement_kmeans(
     X_raw: pd.DataFrame,
     n_clusters: int = PEDAGOGICAL_CLUSTER_COUNT,
 ) -> tuple[pd.Series, pd.DataFrame]:
-    """Fit KMeans on standardized business features and return labels plus raw cluster profiles."""
+    """Fit KMeans on standardized business features and return labels plus raw cluster profiles.
+
+    La standardisation (`StandardScaler`) est indispensable avant KMeans : sans elle,
+    `x1_population` (ordre ~100 000) dominerait totalement la distance euclidienne
+    par rapport à `x3_transport_station_count` (ordre ~20).
+
+    Note : le clustering est réalisé sur variables standardisées, mais les profils
+    de clusters exportés utilisent les valeurs brutes pour rester interprétables.
+    """
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X_raw)
 
     kmeans = KMeans(
         n_clusters=n_clusters,
+        # n_init=20 : 20 initialisations aléatoires indépendantes pour garantir
+        # la stabilité de l'assignation (la valeur par défaut de 10 peut produire
+        # des labelings différents entre deux runs sur un petit jeu de données).
         n_init=20,
         random_state=42,
     )
@@ -112,7 +128,17 @@ def fit_arrondissement_kmeans(
 
 
 def build_cluster_dummies(cluster_labels: pd.Series) -> pd.DataFrame:
-    """One-hot encode cluster labels with drop_first=True to obtain cl_2 and cl_3."""
+    """One-hot encode cluster labels with drop_first=True to obtain cl_2 and cl_3.
+
+    `drop="first"` supprime la première catégorie (cluster 1), qui devient la
+    référence absorbée dans l'intercept de la régression. Inclure toutes les
+    dummies provoquerait une multicolinéarité parfaite (dummy variable trap),
+    rendant le système d'équations non-inversible.
+
+    Les labels KMeans (0, 1, 2) sont renumérotés en (1, 2, 3) avant l'encodage
+    pour obtenir des colonnes nommées `cl_2` et `cl_3` plutôt que `cl_1` et `cl_2`,
+    ce qui facilite la lecture du rapport pédagogique.
+    """
     raw_labels = pd.Series(cluster_labels, index=cluster_labels.index, name="cluster_label").astype(int)
     sorted_labels = sorted(raw_labels.unique().tolist())
     pedagogical_labels = raw_labels.map({label: idx + 1 for idx, label in enumerate(sorted_labels)})
@@ -120,7 +146,7 @@ def build_cluster_dummies(cluster_labels: pd.Series) -> pd.DataFrame:
 
     try:
         encoder = OneHotEncoder(drop="first", sparse_output=False, dtype=int)
-    except TypeError:  # pragma: no cover - compatibility fallback
+    except TypeError:  # pragma: no cover - compatibility fallback pour scikit-learn < 1.2
         encoder = OneHotEncoder(drop="first", sparse=False, dtype=int)
 
     encoded = encoder.fit_transform(pedagogical_df[["cluster_number"]])
@@ -144,6 +170,9 @@ def fit_multiple_linear_regression(X_reg: pd.DataFrame, y: pd.Series) -> dict[st
     n_rows = len(X_reg)
     n_features = X_reg.shape[1]
     r2_value = r2_score(y, predictions)
+    # R² ajusté pénalise la complexité du modèle relativement à n=20.
+    # Avec 9 features pour 20 observations, le R² brut serait artificiellement élevé ;
+    # le R² ajusté corrige ce biais en intégrant le rapport (n-1)/(n-p-1).
     adjusted_r2 = 1 - (1 - r2_value) * (n_rows - 1) / (n_rows - n_features - 1)
 
     coefficient_df = pd.DataFrame(
@@ -171,7 +200,13 @@ def fit_multiple_linear_regression(X_reg: pd.DataFrame, y: pd.Series) -> dict[st
 
 
 def evaluate_linear_regression_loocv(X_reg: pd.DataFrame, y: pd.Series) -> dict[str, float]:
-    """Evaluate the linear regression with Leave-One-Out cross-validation."""
+    """Evaluate the linear regression with Leave-One-Out cross-validation.
+
+    Avec seulement 20 observations, un split classique 80/20 (16/4) serait trop
+    instable : les 4 arrondissements de test changeraient radicalement les métriques
+    selon le tirage. LOOCV utilise les 20 arrondissements tour à tour comme test
+    unique, produisant une estimation de généralisation plus robuste et exhaustive.
+    """
     loo = LeaveOneOut()
     model = LinearRegression()
     loocv_predictions = pd.Series(
@@ -481,12 +516,20 @@ def run_pedagogical_regression_pipeline(force_download: bool = False) -> dict[st
 
 
 # ---------------------------------------------------------------------------
-# Phase 2 – Neural Network pipeline
+# Phase 2 – Réseau de neurones (MLPRegressor)
+# Cette section n'est PAS appelée par main.py. Elle s'exécute depuis
+# notebooks/02_modeling.ipynb ou via run_phase2_neural_network_pipeline().
 # ---------------------------------------------------------------------------
 
 
 def create_feature_response_arrays(master_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
-    """Select X1..X7 features and y_bin_count target; validate types and NaN absence."""
+    """Select X1..X7 features and y_bin_count target; validate types and NaN absence.
+
+    La validation stricte (errors="raise" + vérification NaN explicite) est
+    intentionnellement agressive : un NaN silencieux dans la matrice de features
+    provoquerait une erreur cryptique dans MLPRegressor. Il vaut mieux échouer tôt
+    avec un message clair plutôt que propager une valeur manquante dans le réseau.
+    """
     X = master_df[PHASE2_FEATURE_COLUMNS].copy()
     y = master_df[PHASE2_TARGET_COLUMN].copy()
 
@@ -521,7 +564,12 @@ def create_train_test_datasets(
 
 
 def build_neural_network_pipeline() -> Pipeline:
-    """Build a sklearn Pipeline: StandardScaler + MLPRegressor with fixed hyperparameters."""
+    """Build a sklearn Pipeline: StandardScaler + MLPRegressor with fixed hyperparameters.
+
+    L'encapsulation dans un `Pipeline` garantit que le StandardScaler est ajusté
+    uniquement sur les données d'entraînement lors de la validation croisée LOOCV,
+    évitant ainsi toute fuite d'information (data leakage) vers le test.
+    """
     return Pipeline([
         ("scaler", StandardScaler()),
         ("mlp", MLPRegressor(
@@ -649,7 +697,8 @@ def run_phase2_neural_network_pipeline(
     predictions_df.to_csv(TABLES_DIR / "neural_network_predictions.csv", index=False, encoding="utf-8-sig")
     metrics_df.to_csv(TABLES_DIR / "neural_network_metrics.csv", index=False, encoding="utf-8-sig")
 
-    # Baseline linear regression comparison
+    # Recalcul du baseline Phase 1 sur les mêmes données pour une comparaison directe
+    # (Phase 2 vs Phase 1 dans les mêmes conditions de features et d'observations).
     X_reg = master_df[BUSINESS_FEATURE_COLUMNS].astype(float)
     cluster_labels_bl, _ = fit_arrondissement_kmeans(X_reg)
     cluster_dummies_bl = build_cluster_dummies(cluster_labels_bl)

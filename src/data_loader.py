@@ -19,7 +19,13 @@ LoadedDataset = Union[pd.DataFrame, gpd.GeoDataFrame, dict[str, Any]]
 
 
 def normalize_text(value: Any) -> str:
-    """Normalize text to ASCII for robust rule-based filtering."""
+    """Normalize text to ASCII for robust rule-based filtering.
+
+    NFKD décompose les caractères accentués (ex. 'é' → 'e' + combining accent),
+    puis l'encodage ASCII ignore les combinants, produisant une chaîne sans accents.
+    Cela permet de comparer des valeurs texte françaises sans se soucier des
+    variantes d'encodage ou de casse (le résultat est mis en minuscules).
+    """
     if pd.isna(value):
         return ""
     normalized = unicodedata.normalize("NFKD", str(value))
@@ -43,7 +49,12 @@ def download_dataset(
     headers: Optional[dict[str, str]] = None,
     timeout_seconds: int = 60,
 ) -> Path:
-    """Download a dataset from a URL and persist it locally."""
+    """Download a dataset from a URL and persist it locally.
+
+    `stream=True` + `iter_content` évitent de charger l'intégralité de la réponse
+    en mémoire avant écriture — indispensable pour le ZIP INSEE (~50 MB) et les
+    JSON Overpass (routes OSM > 30 MB).
+    """
     destination = Path(save_path)
     destination.parent.mkdir(parents=True, exist_ok=True)
 
@@ -70,7 +81,17 @@ def download_all_datasets(
     dataset_names: Optional[list[str]] = None,
     force: bool = False,
 ) -> dict[str, Path]:
-    """Download the requested configured datasets."""
+    """Download the requested configured datasets.
+
+    Stratégie de robustesse :
+    1. Cache local : si le fichier existe déjà, le téléchargement est sauté
+       (sauf si force=True), pour éviter des appels inutiles aux APIs Overpass
+       qui ont des limites de débit.
+    2. Retries : le catalogue définit `retry_attempts` et `retry_delay_seconds`
+       par source ; les APIs Overpass nécessitent parfois plusieurs tentatives.
+    3. Fallback URL : si toutes les tentatives échouent, une URL de secours
+       est essayée (ex. data.gouv.fr pour les IRIS IGN).
+    """
     requested_names = dataset_names or list(DATA_SOURCES.keys())
     downloaded_paths: dict[str, Path] = {}
 
@@ -79,6 +100,7 @@ def download_all_datasets(
             raise KeyError(f"Unknown dataset '{name}'.")
 
         source = DATA_SOURCES[name]
+        # Les sources "blocked" (PVP) et "legacy" (Trilib') sont silencieusement ignorées.
         if source.get("status") == "blocked":
             continue
 
@@ -143,7 +165,17 @@ def download_pedagogical_datasets(
 
 
 def parse_overpass_points(json_path: Union[str, Path]) -> gpd.GeoDataFrame:
-    """Convert an Overpass JSON response into a point GeoDataFrame in EPSG:4326."""
+    """Convert an Overpass JSON response into a point GeoDataFrame in EPSG:4326.
+
+    Les objets Overpass de type `node` exposent `lat`/`lon` directement.
+    Les `way` et `relation` n'ont pas de coordonnées propres ; l'API renvoie
+    leur centroïde dans l'objet `center` quand `out center` est spécifié dans
+    la requête. Les éléments sans aucune coordonnée sont ignorés.
+
+    La déduplication sur `(osm_type, osm_id)` élimine les doublons qui peuvent
+    apparaître quand un objet est référencé à la fois comme `way` et comme membre
+    d'une `relation`.
+    """
     json_file = Path(json_path)
     with json_file.open("r", encoding="utf-8") as file_handle:
         payload = json.load(file_handle)
@@ -153,6 +185,7 @@ def parse_overpass_points(json_path: Union[str, Path]) -> gpd.GeoDataFrame:
         latitude = element.get("lat")
         longitude = element.get("lon")
         if latitude is None or longitude is None:
+            # Fallback centroïde pour les ways/relations
             center = element.get("center", {})
             latitude = center.get("lat")
             longitude = center.get("lon")
@@ -190,7 +223,15 @@ def parse_overpass_points(json_path: Union[str, Path]) -> gpd.GeoDataFrame:
 
 
 def parse_overpass_lines(json_path: Union[str, Path]) -> gpd.GeoDataFrame:
-    """Convert an Overpass JSON response with way geometries into a line GeoDataFrame."""
+    """Convert an Overpass JSON response with way geometries into a line GeoDataFrame.
+
+    Contrairement aux points, les routes sont requêtées avec `out geom` (pas
+    `out center`), ce qui renvoie la séquence complète de nœuds de chaque way
+    dans le tableau `geometry`. On reconstruit des objets `LineString` Shapely
+    à partir de ces coordonnées pour calculer les longueurs réelles ultérieurement.
+
+    Un `way` avec moins de 2 points est ignoré (impossible de construire une ligne).
+    """
     json_file = Path(json_path)
     with json_file.open("r", encoding="utf-8") as file_handle:
         payload = json.load(file_handle)
@@ -230,7 +271,18 @@ def parse_overpass_to_geodataframe(json_path: Union[str, Path]) -> gpd.GeoDataFr
 
 
 def load_insee_population(zip_path: Union[str, Path], dept_filter: str = "75") -> pd.DataFrame:
-    """Load the INSEE population ZIP, filter to Paris, and keep the core columns."""
+    """Load the INSEE population ZIP, filter to Paris, and keep the core columns.
+
+    Stratégie de lecture en deux passes :
+    1. Tentative directe avec `compression="zip"` (fonctionne si le ZIP contient
+       un seul membre CSV avec un nom standard).
+    2. En cas d'échec (noms de membres atypiques ou ZIP multi-fichiers), ouverture
+       manuelle du ZIP pour trouver le premier membre `.csv` et le lire.
+
+    `str.zfill(9)` normalise les codes IRIS sur 9 chiffres car pandas les lit
+    parfois comme entiers (perdant les zéros initiaux), et la jointure avec les
+    contours IGN requiert exactement 9 caractères.
+    """
     selected_columns = ["IRIS", "COM", "P22_POP", "P22_PMEN"]
     source_path = Path(zip_path)
 
@@ -255,8 +307,10 @@ def load_insee_population(zip_path: Union[str, Path], dept_filter: str = "75") -
                     dtype={"IRIS": "string", "COM": "string"},
                 )
 
+    # Normalisation des codes pour garantir la cohérence des jointures
     population_df["IRIS"] = population_df["IRIS"].astype("string").str.zfill(9)
     population_df["COM"] = population_df["COM"].astype("string").str.zfill(5)
+    # Filtre Paris : codes commune commençant par "75" (75101…75120)
     population_df = population_df.loc[population_df["COM"].str.startswith(dept_filter)].copy()
     population_df["P22_POP"] = pd.to_numeric(population_df["P22_POP"], errors="coerce").fillna(0.0)
     population_df["P22_PMEN"] = pd.to_numeric(population_df["P22_PMEN"], errors="coerce").fillna(0.0)
@@ -268,7 +322,12 @@ def load_population_for_arrondissements(
     zip_path: Optional[Union[str, Path]] = None,
     dept_filter: str = "75",
 ) -> pd.DataFrame:
-    """Aggregate INSEE population totals to the arrondissement level."""
+    """Aggregate INSEE population totals to the arrondissement level.
+
+    Le code arrondissement est extrait des 2 derniers caractères du code commune
+    INSEE : "75101" → "01", "75115" → "15". Ce mapping est une propriété stable
+    du découpage parisien (arrondissement N = commune 751NN).
+    """
     dataset_path = _resolve_dataset_path("iris_population", zip_path)
     population_df = load_insee_population(dataset_path, dept_filter=dept_filter)
     population_df["arrondissement_code"] = population_df["COM"].str[-2:]
@@ -284,11 +343,23 @@ def load_population_for_arrondissements(
 def load_green_spaces_for_arrondissements(
     csv_path: Optional[Union[str, Path]] = None,
 ) -> gpd.GeoDataFrame:
-    """Load the OpenData Paris green spaces polygons used for X4."""
+    """Load the OpenData Paris green spaces polygons used for X4.
+
+    Deux filtres métier sont appliqués pour exclure les éléments décoratifs qui
+    biaiseraient la surface d'espaces verts accessibles :
+    - `categorie == "Jardiniere"` : 866 lignes, petits objets sur voie publique
+    - `type_ev == "Decorations sur la voie publique"` : talus, murs végétalisés
+
+    `buffer(0)` est un trick Shapely standard pour réparer les polygones
+    auto-intersectants (topologie invalide) sans modifier leur forme perceptible.
+    Ces géométries invalides proviennent généralement d'artefacts de numérisation
+    et provoqueraient des erreurs lors des intersections spatiales ultérieures.
+    """
     dataset_path = _resolve_dataset_path("green_spaces", csv_path)
     read_kwargs = DATA_SOURCES["green_spaces"].get("read_csv_kwargs", {})
     green_df = pd.read_csv(dataset_path, **read_kwargs)
 
+    # normalize_text retire les accents pour des comparaisons robustes
     categories = green_df["categorie"].map(normalize_text)
     types = green_df["type_ev"].map(normalize_text)
     green_df = green_df.loc[~categories.eq("jardiniere")].copy()
@@ -303,6 +374,7 @@ def load_green_spaces_for_arrondissements(
     )
     invalid_mask = ~green_gdf.geometry.is_valid
     if invalid_mask.any():
+        # buffer(0) : trick Shapely pour corriger les auto-intersections sans altérer la forme
         green_gdf.loc[invalid_mask, "geometry"] = green_gdf.loc[invalid_mask, "geometry"].buffer(0)
 
     green_gdf = green_gdf.loc[
@@ -312,7 +384,12 @@ def load_green_spaces_for_arrondissements(
 
 
 def load_dataset(name: str) -> LoadedDataset:
-    """Load a dataset from the raw data directory based on its configured format."""
+    """Load a dataset from the raw data directory based on its configured format.
+
+    Dispatcher générique utilisé principalement dans les notebooks pour un accès
+    ponctuel. Le pipeline principal utilise les fonctions spécialisées ci-dessus
+    pour les sources complexes (INSEE, espaces verts, terrasses, établissements).
+    """
     if name not in DATA_SOURCES:
         available = ", ".join(sorted(DATA_SOURCES))
         raise KeyError(f"Unknown dataset '{name}'. Available datasets: {available}")
@@ -348,7 +425,15 @@ def load_dataset(name: str) -> LoadedDataset:
 def load_terrasses_for_arrondissements(
     csv_path: Optional[Union[str, Path]] = None,
 ) -> pd.DataFrame:
-    """Charge les terrasses autorisees et calcule la surface totale (m2) par arrondissement."""
+    """Charge les terrasses autorisees et calcule la surface totale (m2) par arrondissement.
+
+    La surface n'est pas un attribut direct du dataset : elle est reconstituée
+    en multipliant `longueur × largeur` déclarées dans l'autorisation administrative.
+    Les valeurs non numériques sont remplacées par 0 (terrasses sans dimensions renseignées).
+
+    Le code arrondissement est extrait du champ numérique `arrondissement` via
+    `str[-2:].zfill(2)` pour homogénéiser avec les autres sources (format "01"…"20").
+    """
     dataset_path = _resolve_dataset_path("terrasses_autorisations", csv_path)
     read_kwargs = DATA_SOURCES["terrasses_autorisations"].get("read_csv_kwargs", {})
     df = pd.read_csv(dataset_path, **read_kwargs)
@@ -361,6 +446,7 @@ def load_terrasses_for_arrondissements(
     arr_num = pd.to_numeric(df["arrondissement"], errors="coerce")
     df = df.loc[arr_num.notna()].copy()
     arr_num = arr_num.loc[df.index]
+    # int → str → [-2:] → zfill(2) : "1" → "01", "15" → "15", "750015" → "15"
     df["arrondissement_code"] = arr_num.astype(int).astype(str).str[-2:].str.zfill(2)
 
     aggregated = (
@@ -376,7 +462,15 @@ def load_schools_for_arrondissements(
     elementaires_path: Optional[Union[str, Path]] = None,
     maternelles_path: Optional[Union[str, Path]] = None,
 ) -> pd.DataFrame:
-    """Charge les 3 types d'etablissements scolaires, filtre la derniere annee scolaire, et renvoie un comptage par arrondissement."""
+    """Charge les 3 types d'etablissements scolaires et renvoie un comptage par arrondissement.
+
+    Chaque fichier couvre plusieurs années scolaires. On filtre sur `annee_scol.max()`
+    pour ne compter que les établissements actifs lors de l'année la plus récente,
+    ce qui évite de comptabiliser des établissements fermés ou fusionnés.
+
+    Les 3 DataFrames sont concaténés avant agrégation : un arrondissement reçoit
+    donc bien le total collèges + élémentaires + maternelles.
+    """
     sources = [
         ("etablissements_scolaires_colleges", colleges_path),
         ("etablissements_scolaires_elementaires", elementaires_path),
@@ -388,9 +482,11 @@ def load_schools_for_arrondissements(
         read_kwargs = DATA_SOURCES[dataset_name].get("read_csv_kwargs", {})
         df = pd.read_csv(path, **read_kwargs, dtype={"arr_insee": "string"})
         df = df.loc[df["annee_scol"].notna()].copy()
+        # Filtre sur la dernière année scolaire disponible dans le fichier
         latest = df["annee_scol"].max()
         df = df.loc[df["annee_scol"] == latest].copy()
         df = df.loc[df["arr_insee"].notna()].copy()
+        # Garde uniquement les établissements parisiens (code INSEE 75xxx)
         df = df.loc[df["arr_insee"].astype(str).str.startswith("75")].copy()
         df["arrondissement_code"] = df["arr_insee"].astype(str).str.zfill(5).str[-2:]
         frames.append(df[["arrondissement_code"]])
